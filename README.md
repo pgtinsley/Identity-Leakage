@@ -1,4 +1,75 @@
-# StyleGAN3-Fun<br><sub>Let's have fun with StyleGAN2/ADA/3!</sub>
+# Identity Leakage
+
+This repository building upon the stylegan3-fun repository for generating fake identities (face, iris, fingerprint) with my trained stylegan2-ada models.
+
+The environment set up is similar to that of stylegan3/stylegan3-fun for conda environments:
+
+```bash
+conda env create -f environment.yaml
+```
+> If submitting jobs on the CRC, I recommend running the above command on a GPU with the architecture that you'll use for eventually submitted jobs.
+
+## General Mitigation Pipeline Specifics
+
+The pipeline for identity leakage mitigation (for all modalities) follows this general set of steps:
+
+* Locate and/or curate the set of authentic training images for a given generative model. We use `stylegan2-ada` in most of our work (occasionally `stylegan3`).
+* Extract features for the training/authentic images (facial embeddings, iris codes, minutiae).
+	* For face, we have used AdaFace, ArcFace and VeriFace templates - among others. 
+	* For iris, we have used HBSIF and VeriEye templates - among others.
+	* For fingerprint, we have used NBIS and VeriFinger templates - among others.
+* Generate fake/synthetic images using your chosen generative model. Most of our models are available on GDrive, and their usage will be listed below. 
+
+	> Using some foresight, you should plan to generate more images than exist in the authentic training set, since some will be removed due to how they match some authentic samples.
+
+* Extract features for the generated/synthetic images using the same feature extraction processes above.
+* Compute match scores with the appropriate matching regime as suggested by the authors of the feature extractors. This may be cosine distance, cosine similarity, dot product, or some proprietary matching algorithm. This step qualifies as establishing a 'base identity leakage' to compare against at the end of this process.
+* Create a directory of synthetic images that do not match any of the authentic images that were seen during training.
+	* Optionally, rank the images in this directory by an image/biometric quality evaluator, and cap the number of images by the number of authentic images in the training set.
+* Train (or re-train if your heart desires) the chosen generative model on this directory of synthetic images.
+* Generate fake/synthetic images using this newly-trained (hopefully leakage-free) generative model.
+* Extract features for the newly minted synthetic images, and compare these against the authentic images that were seen during training.
+* Congratulations, you have successfully mitigated identity leakage by re-training generative models on non-leaky synthetic images!!
+> Note that there are some specifics in this process that were not discussed (center-cropping, resizing, quality scoring, truncation choosing). For inquiries, please email [patrick.g.tinsley@gmail.com](mailto:patrick.g.tinsley@gmail.com).
+
+
+## Using the Models
+
+These models have some custom flags that are needed for generating images. 
+
+The general usage in this repository looks like:
+
+```
+python gen_images_original.py \
+--network=<path/to/model/snapshot.pkl> \
+--trunc=0.5 \
+--seeds=0-999 \
+--outdir=<path/to/dir/of/synthetic/images> \
+--color=0
+```
+
+The color flag should be 0 for grayscale images (iris and fingerprint images); the default value is 1 for face images.
+
+> For CRC users, the other image generation scripts (`gen_images_sameSeeds_diffTrunc.py` and `gen_images_sameTrunc_diffSeeds.py`) allow for passing the $SGE\_TASK\_ID. Examples of this can be seen in JOB\_gen_images.py.
+
+Below is a table of trained and available `stylegan2-ada` models:
+
+| Model | Modality | Trained On | Leaky | Link |
+| --- | --- | --- | --- | --- |
+| stylegan2-ada | Face | Authentic Data (FFHQ) | Potentially | [Model](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl) (directly from NVIDIA) |
+| stylegan2-ada | Face | Authentic Data (CelebA-HQ) | Potentially | [Model](https://drive.google.com/file/d/1at-MCC8M54x02N1kMgXukXIxD1V1l5_a/view?usp=sharing) |
+| stylegan2-ada | Face  | Synthetic Data | Less-So | [Model](https://drive.google.com/file/d/10LD1PzMVEkdY-Qcrfe-089PUrFz-MHnl/view?usp=sharing) |
+| stylegan2-ada | Iris  | Authentic Data (see paper for data set description) | Potentially | [Model](https://drive.google.com/file/d/1Tx6jHIVAIAeBBUdIsZ-5E_PYFkBYGcuk/view?usp=sharing) |
+| stylegan2-ada | Iris  | Synthetic Data | Less-So | [Model](https://drive.google.com/file/d/1RQO14w_Id_NKCHPgvQcm_V5oXFFuNIOJ/view?usp=sharing) |
+| stylegan2-ada | Fingerprint  | Authentic Data (see paper for data set description) | Potentially | [Model](https://drive.google.com/file/d/1G5GvpG3wvcPhna1KQQNN-uzO1r3c5Yib/view?usp=sharing) |
+| stylegan2-ada | Fingerprint  | Synthetic Data | Less-So | Coming Soon! |
+
+## Disclaimer
+
+If users run into any problems with this codebase, please reach out to [ptinsley@nd.edu](mailto:ptinsley@nd.edu) or [patrick.g.tinsley@gmail.com](mailto:patrick.g.tinsley@gmail.com). 
+
+
+## StyleGAN3-Fun Repository Text
 
 SOTA GANs are hard to train and to explore, and StyleGAN2/ADA/3 are no different. The point of this repository is to allow
 the user to both easily train and explore the trained models without unnecessary headaches. 
