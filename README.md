@@ -58,7 +58,7 @@ Below is a table of trained and available `stylegan2-ada` models:
 
 | Model | Modality | Trained On | Leaky | Link |
 | --- | --- | --- | --- | --- |
-| stylegan2-ada | Face | Authentic Data (FFHQ) | Potentially | `https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl` |
+| stylegan2-ada | Face | Authentic Data (FFHQ) | Potentially | `https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl` |
 | stylegan2-ada | Face | Authentic Data (CelebA-HQ) | Potentially | [Model](https://drive.google.com/file/d/1at-MCC8M54x02N1kMgXukXIxD1V1l5_a/view?usp=sharing) |
 | stylegan2-ada | Face  | Synthetic Data | Less-So | [Model](https://drive.google.com/file/d/10LD1PzMVEkdY-Qcrfe-089PUrFz-MHnl/view?usp=sharing) |
 | stylegan2-ada | Iris  | Authentic Data (see paper for data set description) | Potentially | [Model](https://drive.google.com/file/d/1Tx6jHIVAIAeBBUdIsZ-5E_PYFkBYGcuk/view?usp=sharing) |
