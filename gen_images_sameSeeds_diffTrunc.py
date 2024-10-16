@@ -71,21 +71,27 @@ def make_transform(translate: Tuple[float,float], angle: float):
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--seeds', type=parse_range, help='List of random seeds (e.g., \'0,1,4-6\')', required=True)
-@click.option('--trunc', 'truncation_psi', type=float, help='Truncation psi', default=1, show_default=True)
+# @click.option('--trunc', 'truncation_psi', type=float, help='Truncation psi', default=1, show_default=True)
 @click.option('--class', 'class_idx', type=int, help='Class label (unconditional if not specified)')
 @click.option('--noise-mode', help='Noise mode', type=click.Choice(['const', 'random', 'none']), default='const', show_default=True)
 @click.option('--translate', help='Translate XY-coordinate (e.g. \'0.3,1\')', type=parse_vec2, default='0,0', show_default=True, metavar='VEC2')
 @click.option('--rotate', help='Rotation angle in degrees', type=float, default=0, show_default=True, metavar='ANGLE')
 @click.option('--outdir', help='Where to save the output images', type=str, required=True, metavar='DIR')
+# CUSTOM
+@click.option('--idx', help='Index for generating images from different seeds', type=int, required=True, metavar='IDX')
+@click.option('--color', help='Image mode: color (1) or grayscale (0)', type=int, default=1, metavar='COLOR')
 def generate_images(
     network_pkl: str,
     seeds: List[int],
-    truncation_psi: float,
+#     truncation_psi: float,
     noise_mode: str,
     outdir: str,
     translate: Tuple[float,float],
     rotate: float,
-    class_idx: Optional[int]
+    class_idx: Optional[int],
+    # CUSTOM
+    idx: int,
+    color: int
 ):
     """Generate images using pretrained network pickle.
 
@@ -93,12 +99,14 @@ def generate_images(
 
     \b
     # Generate an image using pre-trained AFHQv2 model ("Ours" in Figure 1, left).
-    python gen_images.py --outdir=out --trunc=1 --seeds=2 \\
+    python gen_images_by_taskid.py --outdir=out --trunc=1 --seeds=2 \\
+        --idx=1 --color=1 \\ ## CUSTOM
         --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl
 
     \b
     # Generate uncurated images with truncation using the MetFaces-U dataset
-    python gen_images.py --outdir=out --trunc=0.7 --seeds=600-605 \\
+    python gen_images_by_taskid.py --outdir=out --trunc=0.7 --seeds=600-605 \\
+        --idx=1 --color=1 \\ ## CUSTOM
         --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-metfacesu-1024x1024.pkl
     """
 
@@ -119,23 +127,47 @@ def generate_images(
         if class_idx is not None:
             print ('warn: --class=lbl ignored when running on an unconditional network')
 
-    # Generate images.
-    for seed_idx, seed in enumerate(seeds):
-        print('Generating image for seed %d (%d/%d) ...' % (seed, seed_idx, len(seeds)))
-        z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
+    # CUSTOM
+    truncation_psis = [np.round(i*0.1, 3) for i in range(21)]
+    truncation_psi = truncation_psis[ (idx-1) ]
 
-        # Construct an inverse rotation/translation matrix and pass to the generator.  The
-        # generator expects this matrix as an inverse to avoid potentially failing numerical
-        # operations in the network.
-        if hasattr(G.synthesis, 'input'):
-            m = make_transform(translate, rotate)
-            m = np.linalg.inv(m)
-            G.synthesis.input.transform.copy_(torch.from_numpy(m))
+    if color == 1:
 
-        img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
-        img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-        PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/seed{seed:04d}.png')
+        # Generate images.
+        for seed_idx, seed in enumerate(seeds):
+            print('Generating image for seed %d (%d/%d) ...' % (seed, seed_idx, len(seeds))) # len(seeds) -> len(seeds_tmp)
+            z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
+    
+    #         # Construct an inverse rotation/translation matrix and pass to the generator.  The
+    #         # generator expects this matrix as an inverse to avoid potentially failing numerical
+    #         # operations in the network.
+    #         if hasattr(G.synthesis, 'input'):
+    #             m = make_transform(translate, rotate)
+    #             m = np.linalg.inv(m)
+    #             G.synthesis.input.transform.copy_(torch.from_numpy(m))
+    
+            img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
+            img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
+            PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save('{}/seed{:07d}_trunc{}.png'.format(outdir, seed, str(truncation_psi).replace('.','-')))
+    
+    else:
 
+        # Generate images.
+        for seed_idx, seed in enumerate(seeds):
+            print('Generating image for seed %d (%d/%d) ...' % (seed, seed_idx, len(seeds))) # len(seeds) -> len(seeds_tmp)
+            z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
+    
+    #         # Construct an inverse rotation/translation matrix and pass to the generator.  The
+    #         # generator expects this matrix as an inverse to avoid potentially failing numerical
+    #         # operations in the network.
+    #         if hasattr(G.synthesis, 'input'):
+    #             m = make_transform(translate, rotate)
+    #             m = np.linalg.inv(m)
+    #             G.synthesis.input.transform.copy_(torch.from_numpy(m))
+    
+            img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
+            img = ((img+1)*(255/2)).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
+            PIL.Image.fromarray(img[0], 'L').save('{}/seed{:07d}_trunc{}.png'.format(outdir, seed, str(truncation_psi).replace('.','-'))) #L from RGB
 
 #----------------------------------------------------------------------------
 

@@ -1,3 +1,214 @@
+# StyleGAN3-Fun<br><sub>Let's have fun with StyleGAN2/ADA/3!</sub>
+
+SOTA GANs are hard to train and to explore, and StyleGAN2/ADA/3 are no different. The point of this repository is to allow
+the user to both easily train and explore the trained models without unnecessary headaches. 
+
+As [before](https://github.com/PDillis/stylegan2-fun), we will build upon the official repository, which has the advantage
+of being backwards-compatible. As such, we can use our previously-trained models from StyleGAN2 and StyleGAN2-ADA. Please
+get acquainted with the official repository and its codebase, as we will be building upon it and as such, increase its
+capabilities (but hopefully not its complexity!). 
+
+## Additions
+
+This repository adds/has the following changes (not yet the complete list):
+
+* ***Dataset Setup (`dataset_tool.py`)***
+  * **RGBA support**, so revert saving images to `.png` ([Issue #156](https://github.com/NVlabs/stylegan3/issues/156) by @1378dm). Training can use RGBA and images can be generated.
+    * ***TODO:*** ~~Check that training code is correct for normalizing the alpha channel~~, as well as making the 
+      interpolation code work with this new format (look into [`moviepy.editor.VideoClip`](https://zulko.github.io/moviepy/getting_started/videoclips.html?highlight=mask#mask-clips))
+    * For now, interpolation videos will only be saved in RGB format, e.g., discarding the alpha channel.
+  * **`--center-crop-tall`**: add vertical black bars to the sides of each image in the dataset (rectangular images, with height > width),
+    and you wish to train a square model, in the same vein as the horizontal bars added when using `--center-crop-wide` (where width > height).
+    * This is useful when you don't want to lose information from the left and right side of the image by only using the center
+      crop (ibidem for `--center-crop-wide`, but for the top and bottom of the image)
+    * Note that each image doesn't have to be of the same size, and the added bars will only ensure you get a square image, which will then be
+      resized to the model's desired resolution (set by `--resolution`).
+  * Grayscale images in the dataset are converted to `RGB`
+    * If you want to turn this off, remove the respective line in `dataset_tool.py`, e.g., if your dataset is made of images in a folder, then the function to be used is
+    `open_image_folder` in `dataset_tool.py`, and the line to be removed is `img = img.convert('RGB')` in the `iterate_images` inner function.
+  * The dataset can be forced to be of a specific number of channels, that is, grayscale, RGB or RGBA.
+    * To use this, set `--force-channels=1` for grayscale, `--force-channels=3` for RGB, and `--force-channels=4` for RGBA.
+  * If the dataset tool encounters an error, print it along the offending image, but continue with the rest of the dataset 
+    ([PR #39](https://github.com/NVlabs/stylegan3/pull/39) from [Andreas Jansson](https://github.com/andreasjansson)).
+  * For conditional models, we can use the subdirectories as the classes by adding `--subfolders-as-labels`. This will 
+  generate the `dataset.json` file automatically as done by @pbaylies [here](https://github.com/pbaylies/stylegan2-ada/blob/a8f0b1c891312631f870c94f996bcd65e0b8aeef/dataset_tool.py#L772)
+    * Additionally, in the `--source` folder, we will save a `class_labels.txt` file, to further know which classes correspond to each subdirectory.
+
+* ***Training***
+  * Add `--cfg=stylegan2-ext`, which uses @aydao's extended modifications for handling large and diverse datasets. 
+    * A good explanation is found in Gwern's blog [here](https://gwern.net/face#extended-stylegan2-danbooru2019-aydao)
+    * If you wish to fine-tune from @aydao's Anime model, use `--cfg=stylegan2-ext --resume=anime512` when running `train.py`
+    * Note: ***This is an extremely experimental configuration!*** The `.pkl` files will be ~1.1Gb each and training will slow down
+      significantly. Use at your own risk!
+  * `--blur-percent`: Blur both real and generated images before passing them to the Discriminator. 
+    * The blur (`blur_init_sigma=10.0`) will completely fade after the selected percentage of the training is completed (using a linear ramp).
+    * Another experimental feature, should help with datasets that have a lot of variation, and you wish the model to slowly
+      learn to generate the objects and then its details.
+  * `--mirrory`: Added vertical mirroring for doubling the dataset size (quadrupling if `--mirror` is used; make sure your dataset has either or both 
+    of these symmetries in order for it to make sense to use them)
+  * `--gamma`: If no R1 regularization is provided, the heuristic formula from [StyleGAN](https://github.com/NVlabs/stylegan2) will be used.
+    * Specifically, we will set `gamma=0.0002 * resolution ** 2 / batch_size`
+  * `--aug`: ***TODO:*** add [Deceive-D/APA](https://github.com/EndlessSora/DeceiveD) as an option.
+  * `--augpipe`: Now available to use is [StyleGAN2-ADA's](https://github.com/NVlabs/stylegan2-ada-pytorch) full list of augpipe, i.e., individual augmentations (`blit`, `geom`, `color`, `filter`, `noise`, `cutout`) or their combinations (`bg`, `bgc`, `bgcf`, `bgcfn`, `bgcfnc`).
+  * `--img-snap`: Set when to save snapshot images, so now it's independent of when the model is saved (e.g., save image snapshots more often to know how the model is training without saving the model itself, to save space).
+  * `--snap-res`: The resolution of the snapshots, depending on how many images you wish to see per snapshot. Available resolutions: `1080p`, `4k`, and `8k`.
+  * `--resume-kimg`: Starting number of `kimg`, useful when continuing training a previous run
+  * `--outdir`: Automatically set as `training-runs`, so no need to set beforehand (in general this is true throughout the repository)
+  * `--metrics`: Now set by default to `None`, so there's no need to worry about this one
+  * `--freezeD`: Renamed `--freezed` for better readability
+  * `--freezeM`: Freeze the first layers of the Mapping Network Gm (`G.mapping`)
+  * `--freezeE`: Freeze the embedding layer of the Generator (for class-conditional models)
+  * `--freezeG`: ***TODO:*** Freeze the first layers of the Synthesis Network (`G.synthesis`; less cost to transfer learn, focus on high layers?)
+  * `--resume`: All available pre-trained models from NVIDIA (and more) can be used with a simple dictionary, depending on the `--cfg` used.
+  For example, if you wish to use StyleGAN3's `config-r`, then set `--cfg=stylegan3-r`. In addition, if you wish to transfer learn from FFHQU at 1024 resolution, set `--resume=ffhqu1024`.
+    * The full list of currently available models to transfer learn from (or synthesize new images with) is the following (***TODO:*** add small description of each model, 
+    so the user can better know which to use for their particular use-case; proper citation to original authors as well):
+    
+        <details>
+        <summary>StyleGAN2 models</summary>
+    
+      1. Majority, if not all, are `config-f`: set `--cfg=stylegan2`
+         * `ffhq256`
+         * `ffhqu256`
+         * `ffhq512`
+         * `ffhq1024`
+         * `ffhqu1024`
+         * `celebahq256`
+         * `lsundog256`
+         * `afhqcat512`
+         * `afhqdog512`
+         * `afhqwild512`
+         * `afhq512`
+         * `brecahad512`
+         * `cifar10` (conditional, 10 classes)
+         * `metfaces1024`
+         * `metfacesu1024`
+         * `lsuncar512` (config-f)
+         * `lsuncat256` (config-f)
+         * `lsunchurch256` (config-f)
+         * `lsunhorse256` (config-f)
+         * `minecraft1024` (thanks to @jeffheaton)
+         * `imagenet512` (thanks to @shawwn)
+         * `wikiart1024-C` (conditional, 167 classes; thanks to @pbaylies)
+         * `wikiart1024-U` (thanks to @pbaylies)
+         * `maps1024` (thanks to @tjukanov)
+         * `fursona512` (thanks to @arfafax)
+         * `mlpony512` (thanks to @arfafax)
+         * `lhq1024` (thanks to @justinpinkney)
+         * `afhqcat256` (Deceive-D/APA models)
+         * `anime256` (Deceive-D/APA models)
+         * `cub256` (Deceive-D/APA models)
+         * `sddogs1024` (Self-Distilled StyleGAN models)
+         * `sdelephant512` (Self-Distilled StyleGAN models)
+         * `sdhorses512` (Self-Distilled StyleGAN models)
+         * `sdbicycles256` (Self-Distilled StyleGAN models)
+         * `sdlions512` (Self-Distilled StyleGAN models)
+         * `sdgiraffes512` (Self-Distilled StyleGAN models)
+         * `sdparrots512` (Self-Distilled StyleGAN models)
+      2. Extended StyleGAN2 config from @aydao: set `--cfg=stylegan2-ext`
+         * `anime512` (thanks to @aydao; writeup by @gwern: https://gwern.net/Faces#extended-stylegan2-danbooru2019-aydao)
+        </details>
+    
+        <details>
+        <summary>StyleGAN3 models</summary>
+    
+      1. `config-t`: set `--cfg=stylegan3-t`
+         * `afhq512`
+         * `ffhqu256`
+         * `ffhq1024`
+         * `ffhqu1024`
+         * `metfaces1024`
+         * `metfacesu1024`
+         * `landscapes256` (thanks to @justinpinkney)
+         * `wikiart1024` (thanks to @justinpinkney)
+         * `mechfuture256` (thanks to @edstoica; 29 kimg tick)
+         * `vivflowers256` (thanks to @edstoica; 68 kimg tick)
+         * `alienglass256` (thanks to @edstoica; 38 kimg tick)
+         * `scificity256` (thanks to @edstoica; 210 kimg tick)
+         * `scifiship256` (thanks to @edstoica; 168 kimg tick)
+      2. `config-r`: set `--cfg=stylegan3-r`
+         * `afhq512`
+         * `ffhq1024`
+         * `ffhqu1024`
+         * `ffhqu256`
+         * `metfaces1024`
+         * `metfacesu1024`
+        </details>
+
+    * The main sources of these pretrained models are both the [official NVIDIA repository](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/research/models/stylegan3),
+      as well as other community repositories, such as [Justin Pinkney](https://github.com/justinpinkney) 's [Awesome Pretrained StyleGAN2](https://github.com/justinpinkney/awesome-pretrained-stylegan2)
+      and [Awesome Pretrained StyleGAN3](https://github.com/justinpinkney/awesome-pretrained-stylegan3), [Deceive-D/APA](https://github.com/EndlessSora/DeceiveD),
+      [Self-Distilled StyleGAN/Internet Photos](https://github.com/self-distilled-stylegan/self-distilled-internet-photos), and [edstoica](https://github.com/edstoica) 's 
+      [Wombo Dream](https://www.wombo.art/) [-based models](https://github.com/edstoica/lucid_stylegan3_datasets_models). Others can be found around the net and are properly credited in this repository,
+      so long as they can be easily downloaded with [`dnnlib.util.open_url`](https://github.com/PDillis/stylegan3-fun/blob/4ce9d6f7601641ba1e2906ed97f2739a63fb96e2/dnnlib/util.py#L396).
+
+* ***Interpolation videos***
+    * [Random interpolation](https://youtu.be/DNfocO1IOUE)
+      * [Generate images/interpolations with the internal representations of the model](https://nvlabs-fi-cdn.nvidia.com/_web/stylegan3/videos/video_8_internal_activations.mp4)
+        * Usage: Add `--layer=<layer_name>` to specify which layer to use for interpolation.
+        * If you don't know the names of the layers available for your model, add the flag `--available-layers` and the 
+        layers will be printed to the console, along their names, number of channels, and sizes. 
+        * Use one of `--grayscale` or `--rgb` to specify whether to save the images as grayscale or RGB during the interpolation.
+        * For `--rgb`, three consecutive channels (starting at `--starting-channel=0`) will be used to create the RGB image. For `--grayscale`, only the first channel will be used.
+    * Style-mixing
+    * [Sightseeding](https://twitter.com/PDillis/status/1270341433401249793?s=20&t=yLueNkagqsidZFqZ2jNPAw) (jumpiness has been fixed)
+    * [Circular interpolation](https://youtu.be/4nktYGjSVHg)
+    * [Visual-reactive interpolation](https://youtu.be/KoEAkPnE-zA) (Beta)
+    * Audiovisual-reactive interpolation (TODO)
+    * ***TODO:*** Give support to RGBA models!
+* ***Projection into the latent space***
+    * [Project into $\mathcal{W}+$](https://arxiv.org/abs/1904.03189)
+    * Additional losses to use for better projection (e.g., using VGG16 or [CLIP](https://github.com/openai/CLIP))
+* ***[Discriminator Synthesis](https://arxiv.org/abs/2111.02175)*** (official code)
+    * Generate a static image (`python discriminator_synthesis.py dream --help`) or a [video](https://youtu.be/hEJKWL2VQTE) with a feedback loop (`python discriminator_synthesis.py dream-zoom --help`,
+     `python discriminator_synthesis.py channel-zoom --help`, or `python discriminator_synthesis.py interp --help`)
+    * Start from a random image (`random` for noise or `perlin` for 2D fractal Perlin noise, using 
+      [Mathieu Duchesneau's implementation](https://github.com/duchesneaumathieu/pyperlin)) or from an existing one
+* ***Expansion on GUI/`visualizer.py`***
+    * Added the rest of the affine transformations
+    * Added widget for class-conditional models (***TODO:*** mix classes with continuous values for `cls`!)
+* ***General model and code additions***
+    * [Multi-modal truncation trick](https://arxiv.org/abs/2202.12211): find the different clusters in your model and use the closest one to your dlatent, in order to increase the fidelity
+      * Usage: Run `python multimodal_truncation.py get-centroids --network=<path_to_model>` to use default values; for extra options, run `python multimodal_truncation.py get-centroids --help`
+    * StyleGAN3: anchor the latent space for easier to follow interpolations (thanks to [Rivers Have Wings](https://github.com/crowsonkb) and [nshepperd](https://github.com/nshepperd)).
+    * Use CPU instead of GPU if desired (not recommended, but perfectly fine for generating images, whenever the custom CUDA kernels fail to compile).
+    * Add missing dependencies and channels so that the [`conda`](https://docs.conda.io/en/latest/) environment is correctly setup in Windows 
+      (PR's [#111](https://github.com/NVlabs/stylegan3/pull/111)/[#125](https://github.com/NVlabs/stylegan3/pull/125) and [#80](https://github.com/NVlabs/stylegan3/pull/80) /[#143](https://github.com/NVlabs/stylegan3/pull/143) from the base, respectively)
+    * Use [StyleGAN-NADA](https://github.com/rinongal/StyleGAN-nada) models with any part of the code (Issue [#9](https://github.com/PDillis/stylegan3-fun/issues/9))
+      * The StyleGAN-NADA models must first be converted via [Vadim Epstein](https://github.com/eps696) 's conversion code found [here](https://github.com/eps696/stylegan2ada#tweaking-models).
+    * Add PR [#173](https://github.com/NVlabs/stylegan3/pull/173) for adding the last remaining unknown kwarg for using StyleGAN2 models using TF 1.15.
+* ***TODO*** list (this is a long one with more to come, so any help is appreciated):
+  * Add `--device={cuda, ref}` option to pass to each of the custom operations in order to (theoretically) be able to use AMD GPUs, as explained in
+  @l4rz's post [here](https://github.com/l4rz/practical-aspects-of-stylegan2-training#hardware)
+  * Define a [custom Generator](https://github.com/dvschultz/stylegan2-ada-pytorch/blob/59e05bb115c1c7d0de56be0523754076c2b7ee83/legacy.py#L131) in `legacy.py` to modify the output size
+    * Related: the [multi-latent](https://github.com/dvschultz/stylegan2-ada-pytorch/blob/main/training/stylegan2_multi.py), i.e., the one from [@eps696](https://github.com/eps696/stylegan2)
+  * Add [Top-K training](https://arxiv.org/abs/2002.06224) as done [here](https://github.com/dvschultz/stylegan2-ada/blob/8f4ab24f494483542d31bf10f4fdb0005dc62739/train.py#L272) and [here](https://github.com/dvschultz/stylegan2-ada-pytorch/blob/59e05bb115c1c7d0de56be0523754076c2b7ee83/training/loss.py#L79)
+  * Add panorama/SinGAN/feature interpolation from [StyleGAN of All Trades](https://arxiv.org/abs/2111.01619)
+  * [PTI](https://github.com/danielroich/PTI) for better inversion
+  * [Better sampling](https://arxiv.org/abs/2110.08009)
+  * [Add cross-model interpolation](https://twitter.com/arfafax/status/1297681537337446400?s=20&t=xspnTaLFTvd7y4krg8tkxA)
+  * Blend different models (average checkpoints, copy weights, create initial network), as in @aydao's [StyleGAN2-Surgery](https://github.com/aydao/stylegan2-surgery)
+  * Add multi-crop for the dataset creation, as used in [Earth View](https://github.com/PDillis/earthview#multi-crop---data_augmentpy).
+  * Make it easy to download pretrained models from Drive, otherwise a lot of models can't be used with `dnnlib.util.open_url`
+    (e.g., [StyleGAN-Human](https://github.com/stylegan-human/StyleGAN-Human) models)
+  * Finish documentation for better user experience, add videos/images, code samples, visuals...
+  * Add [Ensembling Off-the-shelf Models for GAN Training](https://arxiv.org/abs/2112.09130) and [Any-resolution Training for High-resolution Image Synthesis](https://chail.github.io/anyres-gan/)
+
+## Notebooks (Coming soon!)
+
+## Sponsors ![GitHub Sponsor](https://img.shields.io/github/sponsors/PDillis?label=Sponsor&logo=GitHub)
+
+This repository has been sponsored by:
+
+[isosceles](https://www.jasonfletcher.info/vjloops/)
+
+Thank you so much! 
+
+If you wish to sponsor me, click here: [![](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/PDillis)
+
+
+---
+
 ## Alias-Free Generative Adversarial Networks (StyleGAN3)<br><sub>Official PyTorch implementation of the NeurIPS 2021 paper</sub>
 
 ![Teaser image](./docs/stylegan3-teaser-1920x1006.png)
@@ -71,7 +282,7 @@ See [Troubleshooting](./docs/troubleshooting.md) for help on common installation
 
 Pre-trained networks are stored as `*.pkl` files that can be referenced using local filenames or URLs:
 
-```.bash
+```bash
 # Generate an image using pre-trained AFHQv2 model ("Ours" in Figure 1, left).
 python gen_images.py --outdir=out --trunc=1 --seeds=2 \
     --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl
@@ -85,7 +296,7 @@ Outputs from the above commands are placed under `out/*.png`, controlled by `--o
 
 **Docker**: You can run the above curated image example using Docker as follows:
 
-```.bash
+```bash
 # Build the stylegan3:latest image
 docker build --tag stylegan3 .
 
@@ -109,7 +320,7 @@ The `docker run` invocation may look daunting, so let's unpack its contents here
 
 This release contains an interactive model visualization tool that can be used to explore various characteristics of a trained model.  To start it, run:
 
-```.bash
+```bash
 python visualizer.py
 ```
 
@@ -119,7 +330,7 @@ python visualizer.py
 
 You can use pre-trained networks in your own Python code as follows:
 
-```.python
+```python
 with open('ffhq.pkl', 'rb') as f:
     G = pickle.load(f)['G_ema'].cuda()  # torch.nn.Module
 z = torch.randn([1, G.z_dim]).cuda()    # latent codes
@@ -133,7 +344,7 @@ The pickle contains three networks. `'G'` and `'D'` are instantaneous snapshots 
 
 The generator consists of two submodules, `G.mapping` and `G.synthesis`, that can be executed separately. They also support various additional options:
 
-```.python
+```python
 w = G.mapping(z, c, truncation_psi=0.5, truncation_cutoff=8)
 img = G.synthesis(w, noise_mode='const', force_fp32=True)
 ```
@@ -146,7 +357,7 @@ Datasets are stored as uncompressed ZIP archives containing uncompressed PNG fil
 
 **FFHQ**: Download the [Flickr-Faces-HQ dataset](https://github.com/NVlabs/ffhq-dataset) as 1024x1024 images and create a zip archive using `dataset_tool.py`:
 
-```.bash
+```bash
 # Original 1024x1024 resolution.
 python dataset_tool.py --source=/tmp/images1024x1024 --dest=~/datasets/ffhq-1024x1024.zip
 
@@ -159,7 +370,7 @@ See the [FFHQ README](https://github.com/NVlabs/ffhq-dataset) for information on
 
 **MetFaces**: Download the [MetFaces dataset](https://github.com/NVlabs/metfaces-dataset) and create a ZIP archive:
 
-```.bash
+```bash
 python dataset_tool.py --source=~/downloads/metfaces/images --dest=~/datasets/metfaces-1024x1024.zip
 ```
 
@@ -167,13 +378,13 @@ See the [MetFaces README](https://github.com/NVlabs/metfaces-dataset) for inform
 
 **AFHQv2**: Download the [AFHQv2 dataset](https://github.com/clovaai/stargan-v2/blob/master/README.md#animal-faces-hq-dataset-afhq) and create a ZIP archive:
 
-```.bash
+```bash
 python dataset_tool.py --source=~/downloads/afhqv2 --dest=~/datasets/afhqv2-512x512.zip
 ```
 
 Note that the above command creates a single combined dataset using all images of all three classes (cats, dogs, and wild animals), matching the setup used in the StyleGAN3 paper. Alternatively, you can also create a separate dataset for each class:
 
-```.bash
+```bash
 python dataset_tool.py --source=~/downloads/afhqv2/train/cat --dest=~/datasets/afhqv2cat-512x512.zip
 python dataset_tool.py --source=~/downloads/afhqv2/train/dog --dest=~/datasets/afhqv2dog-512x512.zip
 python dataset_tool.py --source=~/downloads/afhqv2/train/wild --dest=~/datasets/afhqv2wild-512x512.zip
@@ -183,7 +394,7 @@ python dataset_tool.py --source=~/downloads/afhqv2/train/wild --dest=~/datasets/
 
 You can train new networks using `train.py`. For example:
 
-```.bash
+```bash
 # Train StyleGAN3-T for AFHQv2 using 8 GPUs.
 python train.py --outdir=~/training-runs --cfg=stylegan3-t --data=~/datasets/afhqv2-512x512.zip \
     --gpus=8 --batch=32 --gamma=8.2 --mirror=1
@@ -208,7 +419,7 @@ By default, `train.py` automatically computes FID for each network pickle export
 
 Additional quality metrics can also be computed after the training:
 
-```.bash
+```bash
 # Previous training run: look up options automatically, save result to JSONL file.
 python calc_metrics.py --metrics=eqt50k_int,eqr50k \
     --network=~/training-runs/00000-stylegan3-r-mydataset/network-snapshot-000000.pkl
@@ -249,7 +460,7 @@ References:
 
 The easiest way to inspect the spectral properties of a given generator is to use the built-in FFT mode in `visualizer.py`. In addition, you can visualize average 2D power spectra (Appendix A, Figure 15) as follows:
 
-```.bash
+```bash
 # Calculate dataset mean and std, needed in subsequent steps.
 python avg_spectra.py stats --source=~/datasets/ffhq-1024x1024.zip
 

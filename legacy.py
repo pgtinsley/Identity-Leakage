@@ -21,40 +21,45 @@ from torch_utils import misc
 
 def load_network_pkl(f, force_fp16=False):
     data = _LegacyUnpickler(f).load()
+    try:
+        # Legacy TensorFlow pickle => convert.
+        if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
+            tf_G, tf_D, tf_Gs = data
+            G = convert_tf_generator(tf_G)
+            D = convert_tf_discriminator(tf_D)
+            G_ema = convert_tf_generator(tf_Gs)
+            data = dict(G=G, D=D, G_ema=G_ema)
 
-    # Legacy TensorFlow pickle => convert.
-    if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
-        tf_G, tf_D, tf_Gs = data
-        G = convert_tf_generator(tf_G)
-        D = convert_tf_discriminator(tf_D)
-        G_ema = convert_tf_generator(tf_Gs)
-        data = dict(G=G, D=D, G_ema=G_ema)
+        # Add missing fields.
+        if 'training_set_kwargs' not in data:
+            data['training_set_kwargs'] = None
+        if 'augment_pipe' not in data:
+            data['augment_pipe'] = None
 
-    # Add missing fields.
-    if 'training_set_kwargs' not in data:
-        data['training_set_kwargs'] = None
-    if 'augment_pipe' not in data:
-        data['augment_pipe'] = None
+        # Validate contents.
+        if 'G' in data:
+            assert isinstance(data['G'], torch.nn.Module)
+        if 'D' in data:
+            assert isinstance(data['D'], torch.nn.Module)
+        assert isinstance(data['G_ema'], torch.nn.Module)
+        assert isinstance(data['training_set_kwargs'], (dict, type(None)))
+        assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None)))
 
-    # Validate contents.
-    assert isinstance(data['G'], torch.nn.Module)
-    assert isinstance(data['D'], torch.nn.Module)
-    assert isinstance(data['G_ema'], torch.nn.Module)
-    assert isinstance(data['training_set_kwargs'], (dict, type(None)))
-    assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None)))
-
-    # Force FP16.
-    if force_fp16:
-        for key in ['G', 'D', 'G_ema']:
-            old = data[key]
-            kwargs = copy.deepcopy(old.init_kwargs)
-            fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
-            fp16_kwargs.num_fp16_res = 4
-            fp16_kwargs.conv_clamp = 256
-            if kwargs != old.init_kwargs:
-                new = type(old)(**kwargs).eval().requires_grad_(False)
-                misc.copy_params_and_buffers(old, new, require_all=True)
-                data[key] = new
+        # Force FP16.
+        if force_fp16:
+            for key in ['G', 'D', 'G_ema']:
+                old = data[key]
+                kwargs = copy.deepcopy(old.init_kwargs)
+                fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
+                fp16_kwargs.num_fp16_res = 4
+                fp16_kwargs.conv_clamp = 256
+                if kwargs != old.init_kwargs:
+                    new = type(old)(**kwargs).eval().requires_grad_(False)
+                    misc.copy_params_and_buffers(old, new, require_all=True)
+                    data[key] = new
+    except KeyError:
+        # Most likely a StyleGAN-NADA pkl, so pass and return data
+        pass
     return data
 
 #----------------------------------------------------------------------------
@@ -142,7 +147,6 @@ def convert_tf_generator(tf_G):
             w_avg_beta      = kwarg('w_avg_beta',           0.995,  none=1),
         ),
     )
-
     # Check for unknown kwargs.
     kwarg('truncation_psi')
     kwarg('truncation_cutoff')
@@ -150,12 +154,25 @@ def convert_tf_generator(tf_G):
     kwarg('structure')
     kwarg('conditioning')
     kwarg('fused_modconv')
+    kwarg('randomize_noise')  # PR #173 by @cobanov, for StyleGAN2 models/TF 1.15
+    kwarg('resolution_h')  # For transferring from --network=anime1024 --cfg=stylegan2-ext
+    kwarg('resolution_w')  # For transferring from --network=anime1024 --cfg=stylegan2-ext
     unknown_kwargs = list(set(tf_kwargs.keys()) - known_kwargs)
     if len(unknown_kwargs) > 0:
         raise ValueError('Unknown TensorFlow kwarg', unknown_kwargs[0])
 
     # Collect params.
     tf_params = _collect_tf_params(tf_G)
+
+    # Add changes from --cfg=stylegan2-ext; currently can't think of another way to do this
+    if 'resolution_h' and 'resolution_w' in tf_kwargs:
+        kwargs.channel_max = 1024
+        kwargs.w_dim = 1024
+        kwargs.z_dim = 1024
+        kwargs.mapping_kwargs.layer_features = 1024
+        kwargs.mapping_kwargs.num_layers = 4
+        kwargs.channel_base *= 2
+
     for name, value in list(tf_params.items()):
         match = re.fullmatch(r'ToRGB_lod(\d+)/(.*)', name)
         if match:
@@ -249,9 +266,15 @@ def convert_tf_discriminator(tf_D):
     # Check for unknown kwargs.
     kwarg('structure')
     kwarg('conditioning')
+    kwarg('resolution_h')  # For transferring from --network=anime1024 --cfg=stylegan2-ext
+    kwarg('resolution_w')  # For transferring from --network=anime1024 --cfg=stylegan2-ext
     unknown_kwargs = list(set(tf_kwargs.keys()) - known_kwargs)
     if len(unknown_kwargs) > 0:
         raise ValueError('Unknown TensorFlow kwarg', unknown_kwargs[0])
+
+    # Add changes from --cfg=stylegan2-ext.  (I really can't think of another way tbh)
+    if 'resolution_h' and 'resolution_w' in tf_kwargs:
+        kwargs.epilogue_kwargs.mbstd_num_channels = 4
 
     # Collect params.
     tf_params = _collect_tf_params(tf_D)

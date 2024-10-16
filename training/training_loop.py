@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import dnnlib
 from torch_utils import misc
+from torch_utils import gen_utils
 from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import grid_sample_gradfix
@@ -28,10 +29,11 @@ from metrics import metric_main
 
 #----------------------------------------------------------------------------
 
-def setup_snapshot_image_grid(training_set, random_seed=0):
+def setup_snapshot_image_grid(training_set,  snap_res='8k', random_seed=0):
+    size_dict = {'1080p': (1920, 1080, 3, 2), '4k': (3840, 2160, 7, 4), '8k': (7680, 4320, 7, 4)}
     rnd = np.random.RandomState(random_seed)
-    gw = np.clip(7680 // training_set.image_shape[2], 7, 32)
-    gh = np.clip(4320 // training_set.image_shape[1], 4, 32)
+    gw = np.clip(size_dict[snap_res][0] // training_set.image_shape[1], size_dict[snap_res][2], 32)
+    gh = np.clip(size_dict[snap_res][1] // training_set.image_shape[1], size_dict[snap_res][3], 32)
 
     # No labels => show random subset of training samples.
     if not training_set.has_labels:
@@ -79,11 +81,9 @@ def save_image_grid(img, fname, drange, grid_size):
     img = img.transpose(0, 3, 1, 4, 2)
     img = img.reshape([gh * H, gw * W, C])
 
-    assert C in [1, 3]
-    if C == 1:
-        PIL.Image.fromarray(img[:, :, 0], 'L').save(fname)
-    if C == 3:
-        PIL.Image.fromarray(img, 'RGB').save(fname)
+    assert C in [1, 3, 4]
+    img = img[:, :, 0] if C == 1 else img
+    PIL.Image.fromarray(img, gen_utils.channels_dict[C]).save(fname)
 
 #----------------------------------------------------------------------------
 
@@ -115,6 +115,7 @@ def training_loop(
     kimg_per_tick           = 4,        # Progress snapshot interval.
     image_snapshot_ticks    = 50,       # How often to save image snapshots? None = disable.
     network_snapshot_ticks  = 50,       # How often to save network snapshots? None = disable.
+    snap_res                = '8k',     # Resolution size of the snapshot grid. Choose between [1080p | 4k | 8k]
     resume_pkl              = None,     # Network pickle to resume training from.
     resume_kimg             = 0,        # First kimg to report when resuming training.
     cudnn_benchmark         = True,     # Enable torch.backends.cudnn.benchmark?
@@ -217,12 +218,15 @@ def training_loop(
     grid_c = None
     if rank == 0:
         print('Exporting sample images...')
-        grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
+        grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set, snap_res=snap_res)
         save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
         grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
         images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
         save_image_grid(images, os.path.join(run_dir, 'fakes_init.png'), drange=[-1,1], grid_size=grid_size)
+        if G_ema.synthesis.img_channels == 4:
+            rgb_images = images[:, :3, :, :]
+            save_image_grid(rgb_images, os.path.join(run_dir, 'rgb_fakes_init.png'), drange=[-1,1], grid_size=grid_size)
 
     # Initialize logs.
     if rank == 0:
@@ -352,6 +356,9 @@ def training_loop(
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            if G_ema.synthesis.img_channels == 4:
+                rgb_images = images[:, :3, :, :]
+                save_image_grid(rgb_images, os.path.join(run_dir, f'rgb_fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
 
         # Save network snapshot.
         snapshot_pkl = None
