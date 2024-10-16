@@ -50,6 +50,8 @@ python gen_images_original.py \
 
 The color flag should be 0 for grayscale images (iris and fingerprint images); the default value is 1 for face images.
 
+The truncation value balances sample quality and sample diversity (0 is highest quality, lowest sample diversity between generated images; 1 is lower quality, but images appear very different).
+
 > For CRC users, the other image generation scripts (`gen_images_sameSeeds_diffTrunc.py` and `gen_images_sameTrunc_diffSeeds.py`) allow for passing the $SGE\_TASK\_ID. Examples of this can be seen in JOB\_gen_images.py.
 
 Below is a table of trained and available `stylegan2-ada` models:
