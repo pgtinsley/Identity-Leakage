@@ -1,6 +1,6 @@
 # Identity Leakage
 
-This repository building upon the stylegan3-fun repository for generating fake identities (face, iris, fingerprint) with my trained stylegan2-ada models.
+This repository builds upon the `stylegan3-fun` repository for generating fake identities (face, iris, fingerprint) with my trained `stylegan2-ada` models.
 
 The environment set up is similar to that of stylegan3/stylegan3-fun for conda environments:
 
