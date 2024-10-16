@@ -14,7 +14,7 @@ conda env create -f environment.yaml
 The pipeline for identity leakage mitigation (for all modalities) follows this general set of steps:
 
 * Locate and/or curate the set of authentic training images for a given generative model. We use `stylegan2-ada` in most of our work (occasionally `stylegan3`).
-* Extract features for the training/authentic images (facial embeddings, iris codes, minutiae).
+* Extract features for the training/authentic images (facial embeddings, iris codes, fingerprint minutiae).
 	* For face, we have used AdaFace, ArcFace and VeriFace templates - among others. 
 	* For iris, we have used HBSIF and VeriEye templates - among others.
 	* For fingerprint, we have used NBIS and VeriFinger templates - among others.
@@ -40,6 +40,7 @@ These models have some custom flags that are needed for generating images.
 The general usage in this repository looks like:
 
 ```
+# This code would generate 1000 images of face/iris/fingerprint images with a truncation value of 0.5.
 python gen_images_original.py \
 --network=<path/to/model/snapshot.pkl> \
 --trunc=0.5 \
